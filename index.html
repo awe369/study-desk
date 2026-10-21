@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Study Desk</title>
+<meta name="theme-color" content="#14161c">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="in">
+    <div class="logo"><i>S</i>Study Desk</div>
+    <span class="sp"></span>
+    <button class="iconbtn" id="bellBtn" title="Reminders">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+    </button>
+    <button class="iconbtn" id="menuBtn" title="Backup">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+    </button>
+    <div id="menu" class="menu hidden">
+      <button data-menu="export">Export backup</button>
+      <button data-menu="import">Import backup</button>
+    </div>
+  </div>
+  <nav class="tabs in" id="tabs">
+    <button data-tab="today" class="on">Today</button>
+    <button data-tab="library">Library</button>
+    <button data-tab="stats">Stats</button>
+  </nav>
+</header>
+
+<main class="wrap" id="main">
+  <section id="view-today"></section>
+  <section id="view-library" class="hidden"></section>
+  <section id="view-stats" class="hidden"></section>
+</main>
+
+<button class="fab" id="addBtn"><span>+</span> Add</button>
+<input type="file" id="importFile" accept=".json,application/json" hidden>
+<div class="drop hidden" id="drop">Drop a PDF, HTML or Word file to add it</div>
+
+<dialog id="itemDlg">
+  <form id="itemForm">
+    <h3 id="dlgTitle">Add study material</h3>
+    <div class="seg" id="typeSeg">
+      <button type="button" data-type="pdf">PDF</button>
+      <button type="button" data-type="youtube">YouTube</button>
+      <button type="button" data-type="html">HTML</button>
+      <button type="button" data-type="docx">Word</button>
+      <button type="button" data-type="web">Webpage</button>
+    </div>
+    <label class="fld" id="fFileWrap"><span>File</span><input type="file" id="fFile"></label>
+    <label class="fld" id="fUrlWrap"><span id="fUrlLabel">Link</span><input type="text" inputmode="url" autocomplete="off" id="fUrl" placeholder="https://"></label>
+    <label class="fld"><span>Title</span><input id="fTitle" placeholder="Optional — taken from the file or video"></label>
+    <label class="fld" id="fEstWrap"><span>Reading time (minutes)</span><input type="number" id="fEst" min="1" inputmode="numeric" placeholder="Optional — progress fills as you spend time"></label>
+    <label class="fld" id="fProgWrap"><span>Progress <b id="fProgVal"></b></span><input type="range" id="fProg" min="0" max="100" step="1"></label>
+    <div class="sched">
+      <label class="chk"><input type="checkbox" id="fSched" checked> Schedule a daily study time</label>
+      <div class="row" id="fSchedRow">
+        <label class="fld"><span>From</span><input type="date" id="fStart"></label>
+        <label class="fld"><span>Time</span><input type="time" id="fTime" value="17:00"></label>
+        <label class="fld"><span>Repeat</span>
+          <select id="fRepeat">
+            <option value="daily">Every day until finished</option>
+            <option value="weekdays">Mon–Fri until finished</option>
+            <option value="once">Once</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="dlgerr" id="fErr"></div>
+    <div class="dlgact">
+      <button type="button" class="btn danger hidden" id="fDelete">Delete</button>
+      <span class="sp"></span>
+      <button type="button" class="btn" id="fCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="fSave">Add</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="reader" class="reader hidden">
+  <div class="rbar">
+    <button class="iconbtn" id="rClose" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div class="rtitle"><b id="rTitle"></b><span id="rSub"></span></div>
+    <div class="rtools" id="rTools"></div>
+    <button class="btn sm" id="rPause">Pause</button>
+    <button class="btn sm good" id="rDone">Done</button>
+  </div>
+  <div class="rprog"><i id="rProg"></i></div>
+  <div class="rbody" id="rBody"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
