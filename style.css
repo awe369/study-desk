@@ -71,7 +71,16 @@ header.top .in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;alig
 /* cards */
 .list{display:flex;flex-direction:column;gap:10px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px 14px;display:flex;gap:12px;align-items:center;box-shadow:var(--shadow)}
-.card.done{opacity:.7}
+.card.done{opacity:.6}
+.card.done .ttl span.t{text-decoration:line-through;text-decoration-color:var(--dim)}
+.card.leaving{animation:leave .26s ease-in forwards}
+.card.arrive{animation:arrive .35s ease-out}
+@keyframes leave{to{opacity:0;transform:translateY(14px) scale(.98)}}
+@keyframes arrive{from{opacity:0;transform:translateY(-10px)}}
+.check{flex:none;width:26px;height:26px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;color:transparent;transition:.15s}
+.check svg{width:15px;height:15px}
+.check:hover{border-color:var(--good);color:var(--good)}
+.card.done .check{background:var(--good);border-color:var(--good);color:#fff}
 .card .time{width:58px;flex:none;font-weight:600;font-size:.88rem;color:var(--muted);text-align:center;line-height:1.2}
 .card .time small{display:block;font-weight:500;font-size:.72rem;color:var(--dim)}
 .card .time.due{color:var(--warn)}
@@ -111,7 +120,13 @@ header.top .in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;alig
 .rows .r:first-child{border-top:none}
 .rows .r .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rows .r .v{color:var(--muted);font-size:.84rem;flex:none}
-@media (max-width:560px){ .tiles{grid-template-columns:repeat(2,1fr)} .card .time{width:46px} }
+@media (max-width:560px){
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  .card{flex-wrap:wrap;row-gap:8px;gap:10px}
+  .card .time{width:44px}
+  .card .main{flex:1 1 0}
+  .card .acts{flex-basis:100%;justify-content:flex-end;margin-top:-2px}
+}
 
 /* dialog */
 dialog{border:none;border-radius:18px;padding:0;background:var(--surface);color:var(--text);width:min(520px,calc(100vw - 24px));box-shadow:0 20px 60px rgba(0,0,0,.3)}

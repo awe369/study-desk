@@ -90,7 +90,27 @@ const db = {
 };
 
 let items = [];
-const save = it => db.put('items', it).catch(e => console.error('save failed', e));
+// An IndexedDB write can be lost when the tab is closed mid-write, so the reading position is also
+// copied to localStorage (which writes immediately) and merged back on the next load.
+function save(it) {
+  it.savedAt = Date.now();
+  try {
+    localStorage.setItem('sd-pos-' + it.id, JSON.stringify({ pos: it.pos, total: it.total, progress: it.progress, timeSpent: it.timeSpent, savedAt: it.savedAt }));
+  } catch { /* storage blocked or full */ }
+  return db.put('items', it).catch(e => console.error('save failed', e));
+}
+function restoreBackup(it) {
+  try {
+    const b = JSON.parse(localStorage.getItem('sd-pos-' + it.id) || 'null');
+    if (!b || !(b.savedAt > (it.savedAt || 0))) return false;
+    it.pos = b.pos;
+    it.total = b.total || it.total;
+    it.progress = Math.max(it.progress, b.progress || 0);
+    it.timeSpent = Math.max(it.timeSpent, b.timeSpent || 0);
+    it.savedAt = b.savedAt;
+    return true;
+  } catch { return false; }
+}
 function normalize(it) {
   it.hist ||= {};
   it.progress ||= 0; it.pos ||= 0; it.total ||= 0; it.timeSpent ||= 0;
@@ -136,7 +156,32 @@ function posText(it) {
 }
 
 /* ---------- views ---------- */
-let tab = 'today', libFilter = 'all';
+let tab = 'today', libFilter = 'all', justMoved = null;
+
+// Tick an item off like a to-do: it slides out and reappears at the bottom of the list.
+async function toggleDone(id, cardEl) {
+  const it = items.find(x => x.id === id);
+  if (!it) return;
+  const h = todayHist(it);
+  if (it.done) {
+    it.done = false;
+    it.doneOn = null;
+    if (it.progressBeforeDone != null) it.progress = it.progressBeforeDone;
+  } else {
+    it.progressBeforeDone = it.progress;
+    it.done = true;
+    it.doneOn = dayKey();
+    it.progress = 1;
+  }
+  h.p1 = it.progress;
+  save(it);
+  cardEl?.classList.add('leaving');
+  await new Promise(res => setTimeout(res, cardEl ? 260 : 0));
+  justMoved = id;
+  render();
+  justMoved = null;
+  if (it.done) toast(`✓ “${it.title}” done`);
+}
 
 function card(it, { time } = {}) {
   const t = dayKey();
@@ -154,7 +199,10 @@ function card(it, { time } = {}) {
   } else {
     status = it.done ? `Finished${it.doneOn ? ' ' + it.doneOn : ''}` : scheduleText(it);
   }
-  return `<article class="card${it.done ? ' done' : ''}" data-id="${it.id}">
+  return `<article class="card${it.done ? ' done' : ''}${it.id === justMoved ? ' arrive' : ''}" data-id="${it.id}">
+    <button class="check" data-act="toggle" role="checkbox" aria-checked="${!!it.done}" title="${it.done ? 'Mark as not done' : 'Mark as done'}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    </button>
     ${timeCol}
     <div class="main" data-act="open">
       <div class="ttl"><span class="tag ${it.type}">${TYPES[it.type].label}</span><span class="t">${esc(it.title)}</span></div>
@@ -183,7 +231,8 @@ function streak(totals) {
 
 function renderToday() {
   const t = dayKey();
-  const plan = items.filter(it => scheduledOn(it, t)).sort((a, b) => a.schedule.time.localeCompare(b.schedule.time));
+  const plan = items.filter(it => scheduledOn(it, t))
+    .sort((a, b) => (!!a.done - !!b.done) || a.schedule.time.localeCompare(b.schedule.time));
   const others = items.filter(it => !it.done && !plan.includes(it) && (it.progress > 0 || it.timeSpent > 0))
     .sort((a, b) => (b.lastOpened || 0) - (a.lastOpened || 0)).slice(0, 6);
   const totals = dayTotals();
@@ -212,7 +261,7 @@ function renderLibrary() {
   const filters = [['all', 'All'], ['pdf', 'PDF'], ['youtube', 'YouTube'], ['html', 'HTML'], ['docx', 'Word'], ['web', 'Webpages']]
     .filter(([k]) => k === 'all' || counts[k]);
   const list = items.filter(it => libFilter === 'all' || it.type === libFilter)
-    .sort((a, b) => (a.done - b.done) || ((b.lastOpened || b.createdAt) - (a.lastOpened || a.createdAt)));
+    .sort((a, b) => (!!a.done - !!b.done) || ((b.lastOpened || b.createdAt) - (a.lastOpened || a.createdAt)));
   $('#view-library').innerHTML = `
     <div class="filters">${filters.map(([k, l]) => `<button data-filter="${k}" class="${libFilter === k ? 'on' : ''}">${l} ${counts[k] || 0}</button>`).join('')}</div>
     ${list.length ? `<div class="list">${list.map(it => card(it)).join('')}</div>`
@@ -432,6 +481,7 @@ async function deleteItem(it) {
   items = items.filter(x => x !== it);
   await db.del('items', it.id);
   if (it.fileId) await db.del('files', it.fileId);
+  try { localStorage.removeItem('sd-pos-' + it.id); } catch { /* ignore */ }
   dlg.close();
   render();
 }
@@ -521,6 +571,7 @@ async function openReader(id) {
 async function closeReader() {
   const r = R;
   if (!r) return;
+  try { r.flush?.(); } catch { /* player already gone */ }
   R = null;
   r.timers.forEach(clearInterval);
   r.offs.forEach(f => f());
@@ -542,6 +593,26 @@ const OPENERS = {
     if (R !== r) return;
     let start = Math.floor(it.pos || 0);
     if (it.done || (it.total && start >= it.total - 3)) start = 0;
+    // Until the video has actually reached the resume point (ads play first, and some browsers
+    // ignore `start`), the player's time is not recorded, so it can't overwrite the saved spot with 0.
+    r.ytResumed = start < 3;
+    const PLAYING = 1, PAUSED = 2, BUFFERING = 3, ENDED = 0;
+    const read = () => {
+      const p = r.player;
+      if (!p?.getPlayerState) return;
+      const st = p.getPlayerState(), t = p.getCurrentTime(), d = p.getDuration();
+      r.playing = st === PLAYING;
+      if (!r.ytResumed) {
+        if (st !== PLAYING) return;
+        if (t < start - 3) { p.seekTo(start, true); return; }
+        r.ytResumed = true;
+      }
+      if (![PLAYING, PAUSED, BUFFERING].includes(st) || !d) return;
+      it.total = d;
+      it.pos = t;
+      setProgress(r, t / d);
+    };
+    r.flush = read;
     r.player = new YT.Player('ytp', {
       videoId: it.videoId,
       playerVars: { start, rel: 0, playsinline: 1, autoplay: 1 },
@@ -553,20 +624,14 @@ const OPENERS = {
           if (t && it.autoTitle) { it.title = t; it.autoTitle = false; $('#rTitle').textContent = t; }
         },
         onStateChange(e) {
-          r.playing = e.data === YT.PlayerState.PLAYING;
-          if (e.data === YT.PlayerState.ENDED) { it.pos = 0; setProgress(r, 1); save(it); }
+          if (R !== r) return;
+          read();
+          if (e.data === ENDED) { it.pos = 0; setProgress(r, 1); }
+          if (e.data === PAUSED || e.data === ENDED) save(it);
         },
       },
     });
-    r.timers.push(setInterval(() => {
-      const p = r.player;
-      if (R !== r || !p?.getCurrentTime || !r.playing) return;
-      const t = p.getCurrentTime(), d = p.getDuration();
-      if (!d) return;
-      it.total = d;
-      it.pos = t;
-      setProgress(r, t / d);
-    }, 1000));
+    r.timers.push(setInterval(() => { if (R === r) read(); }, 1000));
   },
 
   async pdf(it, r) {
@@ -773,6 +838,7 @@ $('#main').onclick = e => {
   if (!a) return;
   if (a.dataset.act === 'add') return openDialog();
   const id = a.closest('[data-id]')?.dataset.id;
+  if (a.dataset.act === 'toggle') toggleDone(id, a.closest('.card'));
   if (a.dataset.act === 'open') openReader(id);
   if (a.dataset.act === 'edit') openDialog(items.find(x => x.id === id));
 };
@@ -795,14 +861,6 @@ $('#rPause').onclick = () => {
   R.paused = !R.paused;
   $('#rPause').textContent = R.paused ? 'Resume' : 'Pause';
   updateReaderBar();
-};
-$('#rDone').onclick = async () => {
-  if (!R) return;
-  const r = R;
-  setProgress(r, 1, { force: true });
-  if (r.it.type === 'youtube') r.it.pos = 0;
-  await closeReader();
-  toast('🎉 Marked as finished');
 };
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && R && !dlg.open) closeReader();
@@ -843,11 +901,17 @@ window.addEventListener('drop', e => {
   $('#fFile').files = e.dataTransfer.files;
 });
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && R) save(R.it); });
-window.addEventListener('pagehide', () => { if (R) save(R.it); });
+function saveNow() {
+  if (!R) return;
+  try { R.flush?.(); } catch { /* player already gone */ }
+  save(R.it);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+window.addEventListener('pagehide', saveNow);
 
 (async function init() {
   items = (await db.all('items')).map(normalize);
+  items.forEach(it => { if (restoreBackup(it)) db.put('items', it); });
   syncBell();
   render();
   checkReminders();
