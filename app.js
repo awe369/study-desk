@@ -105,7 +105,7 @@ function restoreBackup(it) {
     if (!b || !(b.savedAt > (it.savedAt || 0))) return false;
     it.pos = b.pos;
     it.total = b.total || it.total;
-    it.progress = Math.max(it.progress, b.progress || 0);
+    it.progress = clamp01(b.progress);
     it.timeSpent = Math.max(it.timeSpent, b.timeSpent || 0);
     it.savedAt = b.savedAt;
     return true;
@@ -180,7 +180,7 @@ async function toggleDone(id, cardEl) {
   justMoved = id;
   render();
   justMoved = null;
-  if (it.done) toast(`✓ “${it.title}” done`);
+  if (it.done) toast(`Marked “${it.title}” as complete`);
 }
 
 function card(it, { time } = {}) {
@@ -192,7 +192,7 @@ function card(it, { time } = {}) {
     const due = !it.done && it.schedule.time <= hm() && !(h?.s >= 60);
     const overdue = it.schedule.repeat === 'once' && it.schedule.start < t;
     timeCol = `<div class="time${due ? ' due' : ''}">${fmt12(it.schedule.time).replace(' ', '<small>')}</small></div>`;
-    status = it.done ? 'Finished today 🎉'
+    status = it.done ? 'Completed today'
       : h?.s >= 60 ? `Studied ${fmtMin(h.s)} today`
       : overdue ? 'Overdue'
       : due ? 'Due now' : 'Upcoming';
@@ -241,7 +241,7 @@ function renderToday() {
   const date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
   let html = `<div class="dayhead"><h2>${esc(date)}</h2>
-    <p>${plan.length ? `${touched} of ${plan.length} planned tasks done today · ` : ''}${fmtMin(totals[t] || 0)} studied${st ? ` · 🔥 ${st}-day streak` : ''}</p></div>`;
+    <p>${plan.length ? `${touched} of ${plan.length} planned tasks done today · ` : ''}${fmtMin(totals[t] || 0)} studied${st ? ` · ${st}-day streak` : ''}</p></div>`;
   if (!items.length) {
     html += `<div class="empty"><b>Your study desk is empty</b>Add a PDF, YouTube video, HTML file, Word file or any webpage,
       pick a time like 5:00 PM, and it will show up here every day — opening right where you stopped.
@@ -280,7 +280,7 @@ function renderStats() {
     <div class="tiles">
       <div class="tile"><b>${fmtMin(totals[t] || 0)}</b><span>Today</span></div>
       <div class="tile"><b>${fmtMin(week)}</b><span>Last 7 days</span></div>
-      <div class="tile"><b>${streak(totals)} 🔥</b><span>Day streak</span></div>
+      <div class="tile"><b>${streak(totals)} ${streak(totals) === 1 ? 'day' : 'days'}</b><span>Day streak</span></div>
       <div class="tile"><b>${items.filter(i => i.done).length} / ${items.length}</b><span>Finished</span></div>
     </div>
     <div class="sec">Minutes studied · last 14 days</div>
@@ -494,17 +494,21 @@ function on(target, ev, fn, r, opts) {
   r.offs.push(() => target.removeEventListener(ev, fn, opts));
 }
 
+// Progress follows the current reading position, so it goes down again when you scroll / seek back.
+// A finished item keeps its 100% while being revised; only the manual slider can reopen it.
 function setProgress(r, p, { force = false } = {}) {
   const it = r.it;
   const h = todayHist(it);
   p = clamp01(p);
-  it.progress = force ? p : Math.max(it.progress, p);
+  if (it.done && !force) return;
+  it.progress = p;
+  it.furthest = Math.max(it.furthest || 0, p);
   h.p1 = it.progress;
   if (it.progress >= 0.995 && !it.done) {
     it.done = true;
     it.doneOn = dayKey();
     save(it);
-    toast('🎉 Finished! Marked as done.');
+    toast('Completed — marked as done.');
   } else if (force && it.progress < 0.995) {
     it.done = false;
     it.doneOn = null;
@@ -517,8 +521,9 @@ function updateReaderBar() {
   const it = r.it;
   $('#rProg').style.width = pct(it) + '%';
   const sub = $('#rSub');
-  const state = r.paused ? ' · paused' : r.active ? '' : it.type === 'youtube' ? ' · clock runs while playing' : ' · idle, clock stopped';
-  sub.textContent = `${pct(it)}% · this session ${fmtDur(r.secs)}${state}`;
+  const state = r.paused ? ' · Paused' : r.active ? '' : it.type === 'youtube' ? ' · Timer runs while playing' : ' · Idle, timer stopped';
+  const where = it.type === 'pdf' && it.total ? `Page ${Math.max(1, it.pos)} of ${it.total} · ` : '';
+  sub.textContent = `${where}${pct(it)}% complete · Session ${fmtDur(r.secs)}${state}`;
   sub.classList.toggle('idle', r.paused || !r.active);
   const range = $('#webRange');
   if (range && document.activeElement !== range) { range.value = pct(it); $('#webPct').textContent = pct(it) + '%'; }
@@ -582,7 +587,7 @@ async function closeReader() {
   $('#reader').classList.add('hidden');
   $('#rBody').innerHTML = '';
   document.body.classList.remove('reading');
-  if (r.secs >= 30 && !r.it.done) toast(`Saved — studied ${fmtMin(r.secs)}, now at ${pct(r.it)}%. Next time it opens right here.`, 3500);
+  if (r.secs >= 30 && !r.it.done) toast(`Progress saved — ${fmtMin(r.secs)} studied, ${pct(r.it)}% complete.`, 3500);
   render();
 }
 
@@ -650,8 +655,14 @@ const OPENERS = {
     const sc = document.createElement('div');
     sc.className = 'pdfscroll';
     body.append(sc);
-    $('#rTools').innerHTML = `<span class="pgnum" id="pgNum"></span>
+    $('#rTools').innerHTML = `<label class="pgnum"><input id="pgNum" type="number" min="1" max="${pdf.numPages}" inputmode="numeric" title="Go to page"> / ${pdf.numPages}</label>
+      <span class="divider"></span>
       <button class="iconbtn" data-z="-1" title="Zoom out">−</button><button class="iconbtn" data-z="1" title="Zoom in">+</button>`;
+    $('#pgNum').onchange = e => {
+      const n = Math.min(pdf.numPages, Math.max(1, parseInt(e.target.value, 10) || 1));
+      sc.scrollTop = r.pages[n - 1].offsetTop - 8;
+      e.target.blur();
+    };
     $('#rTools').onclick = e => {
       const z = e.target.closest('[data-z]');
       if (!z) return;
@@ -704,10 +715,11 @@ const OPENERS = {
       const mid = sc.scrollTop + sc.clientHeight * 0.35;
       let n = 1;
       for (const p of r.pages) { if (p.offsetTop <= mid) n = +p.dataset.n; else break; }
-      const atEnd = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4 && sc.scrollTop > 0;
+      const max = sc.scrollHeight - sc.clientHeight;
       it.pos = n;
-      $('#pgNum').textContent = `${n} / ${pdf.numPages}`;
-      setProgress(r, atEnd ? 1 : (n - 1) / pdf.numPages);
+      $('#pgNum').value = n;
+      setProgress(r, max > 0 ? sc.scrollTop / max : 1);
+      updateReaderBar();
     }
     on(sc, 'scroll', onScroll, r, { passive: true });
     let rt;
@@ -783,7 +795,7 @@ function checkReminders() {
     if (late < 0 || late > 30 || reminded.has(key)) continue;
     reminded.add(key);
     const msg = `${it.title} — ${pct(it)}% done. ${posText(it)}`;
-    toast('⏰ Study time: ' + msg, 6000);
+    toast('Scheduled study time: ' + msg, 6000);
     if (remindersOn()) {
       const n = new Notification('Study time · ' + fmt12(s), { body: msg, icon: 'icon.svg', tag: key });
       n.onclick = () => { window.focus(); openReader(it.id); n.close(); };
